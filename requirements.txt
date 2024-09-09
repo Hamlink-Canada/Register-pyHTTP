@@ -1,0 +1,4 @@
+Flask
+flask-smorest
+flask-kafka
+protobuf
