@@ -1,7 +1,5 @@
 from marshmallow import Schema, fields, ValidationError
 
- 
-
 class NodeData(Schema):
     node = fields.String()
     passwd = fields.String()

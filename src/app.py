@@ -2,6 +2,7 @@ from flask import Flask, request
 from flask_smorest import Api
 from flask_kafka import FlaskKafka
 from routes.root import bp as rootBP
+from db import db
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
@@ -12,6 +13,10 @@ app.config["OPENAPI_VERSION"] = "3.0.2"
 app.config["KAFKA_CONFIG"] = {'bootstrap.servers': 'localhost:9092',
                               'group.id': "foo",
                              }
+app.config["SQLALCHEMY_DATABASE_URI"] = "mysql+pymysql://allstar:change_me@localhost/allstar"
+
+db.init_app(app)
+
 app.bus = FlaskKafka()
 app.bus.init_app(app)
 

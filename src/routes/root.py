@@ -42,4 +42,3 @@ class Register(MethodView):
             'data': [data],    # Successgful 
         }
         return result
-
