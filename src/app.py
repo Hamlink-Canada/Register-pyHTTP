@@ -14,6 +14,7 @@ app.config["KAFKA_CONFIG"] = {'bootstrap.servers': 'localhost:9092',
                               'group.id': "foo",
                              }
 app.config["SQLALCHEMY_DATABASE_URI"] = "mysql+pymysql://allstar:change_me@localhost/allstar"
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {'pool_recycle': 60 * 5, 'pool_pre_ping': True}
 
 db.init_app(app)
 
