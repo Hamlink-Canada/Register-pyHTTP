@@ -1,110 +1,174 @@
-# pyHTTP-Register
+# HTTP repeater registration
 
-Lightweight HTTP endpoint to accept APP RPT node registrations and forward
-them to Kafka as protobuf `update` messages.
+This service accepts HTTP registrations from AllStarLink-compatible nodes. It checks
+each node's password and publishes accepted registrations to Kafka, where the DNS
+directory can pick them up.
 
-Overview
-- Receives node registration POST requests, authenticates against an
-	existing ASL-style database, and publishes a protobuf `update` message
-	to a Kafka topic for consumption by DNS services.
+You need Docker, a reachable Kafka broker, node credentials, and an HTTPS reverse
+proxy for public access. The container serves HTTP on port 5000. The AllStarLink
+client connects over HTTPS, so TLS must terminate at your proxy.
 
-Prerequisites
-- Python 3.8+
-- Kafka cluster available (bootstrap servers)
-- MySQL (or compatible) database with an ASL `user_Nodes` table for
-	authentication, or modify `verifier.verify()` to match your user store
-- `protoc` (Protocol Buffers compiler) if you need to generate `dns_pb2.py`
+## Prepare node credentials
 
-Install
+The default authentication backend reads a CSV file when the service starts:
 
-1. Create and activate a virtual environment:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-# If using MySQL with the URL in `src/app.py` install a driver such as:
-pip install pymysql
+```csv
+node_id,password
+1234,YOUR_GENERATED_PASSWORD
 ```
 
-2. Ensure protobuf bindings for `dns.proto` are available to the app.
+Give each node its own generated password. Use printable ASCII without whitespace;
+32-character base64url passwords fit the client configuration. The file requires the
+`node_id,password` header and rejects duplicate IDs. Restart the service after editing
+it. Never commit a real credential file.
 
-The service imports `dns_pb2` from the application import path. The
-`dns.proto` definition lives in a separate project (DNS server). Obtain
-`dns.proto` from the external `dnsserver` GitHub repository and generate
-`dns_pb2.py`. Two common ways to do this:
+The container runs as UID/GID 10001. That user must be able to read the mounted file;
+restrict other access using the file ownership and permissions on your host.
 
-- Clone the official `dnsserver` repository and build locally:
+## Run the service
 
-```bash
-git clone https://github.com/Apprpt-Central/dnsserver.git
-cd dnsserver
-./build_proto.sh
-# Copy generated bindings into this project's import path
-cp apprptdns/dns_pb2.py ../pyHTTP-Register/src/
+Choose a versioned image from `ghcr.io/hamlink-canada/rpt-http-register` when a release
+is available. Before an image is published, [build this checkout](#build-an-image)
+and use `rpt-http-register:local`.
+
+With `credentials.csv` in the current directory, replace the broker address below:
+
+```sh
+IMAGE=rpt-http-register:local
+
+docker run -d --name rpt-http --restart unless-stopped \
+  --publish 127.0.0.1:5000:5000 \
+  --mount "type=bind,src=$(pwd)/credentials.csv,dst=/run/secrets/credentials.csv,readonly" \
+  --env RPT_AUTH__BACKEND=file \
+  --env RPT_AUTH__FILE=/run/secrets/credentials.csv \
+  --env RPT_KAFKA__BOOTSTRAP=kafka.example.org:9092 \
+  --env RPT_KAFKA__TOPIC=rpt.registrations \
+  --env RPT_SERVER_ID=http-1 \
+  "$IMAGE"
 ```
 
-- Or download the proto file and generate directly into this project:
+This example exposes HTTP only on the host's loopback address for a host-based
+reverse proxy. Point the proxy's HTTPS endpoint at `127.0.0.1:5000`. If your proxy
+runs in another container, use a shared Docker network and configure its upstream
+address accordingly. Kafka's advertised broker addresses must be reachable from
+the registration container.
 
-```bash
-curl -O https://raw.githubusercontent.com/Apprpt-Central/dnsserver/main/dns.proto
-protoc --python_out=pyHTTP-Register/src dns.proto
-# move generated file into the expected package location if necessary
-mv pyHTTP-Register/src/apprptdns/dns_pb2.py pyHTTP-Register/src/
+The node address comes from the HTTP connection. If the proxy supplies that address
+through `X-Forwarded-For`, explicitly configure `HTTP.TRUSTED_PROXIES` with the proxy
+addresses as seen by the container and `HTTP.PROXY_HOPS` with the trusted hop count.
+The proxy must overwrite client-supplied forwarding headers. Forwarded addresses are
+ignored by default; incorrect proxy configuration can publish the proxy's address
+as the node address. For example, in `settings.toml`:
+
+```toml
+[http]
+trusted_proxies = ["192.0.2.10/32"]
+proxy_hops = 1
 ```
 
-Note: `dnsserver` is a separate GitHub project: https://github.com/Apprpt-Central/dnsserver
+Replace the example CIDR with your proxy's actual address. See
+[HTTP compatibility](docs/http-compatibility.md) for the client contract.
 
-Configuration
+## Configuration
 
-- Edit `src/app.py` to configure `KAFKA_CONFIG` and `SQLALCHEMY_DATABASE_URI`.
-	Example Kafka config uses `bootstrap.servers` as expected by the
-	confluent client wrapper.
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `RPT_KAFKA__BOOTSTRAP` | `localhost:9092` | Kafka bootstrap address. |
+| `RPT_KAFKA__TOPIC` | `rpt.registrations` | Topic shared with the DNS directory. |
+| `RPT_SERVER_ID` | `registrar-1` in the image settings | Identifier included in registrations. |
+| `RPT_REFRESH` | `60` | Refresh value returned to clients, in seconds. |
+| `RPT_LIFETIME` | `180` | Registration validity, in seconds. |
+| `RPT_AUTH__BACKEND` | `file` | Credential source: `file` or `grpc`. |
+| `RPT_AUTH__FILE` | `/run/secrets/credentials.csv` in the image settings | Local credential file. |
+| `RPT_HTTP__MAX_BODY` | `16384` | Maximum request body size in bytes. |
 
-Running the service
+Dynaconf reads `settings.toml` and optional `.secrets.toml` from the working directory,
+then applies `RPT_` environment overrides. Nested settings use two underscores.
+To mount your own files at `/config`, set `RPT_CONFIG_DIR=/config`. Use plain TOML
+without environment sections, and absolute paths for mounted credential files.
 
-Run the Flask app (from the repository root):
+The `grpc` backend retrieves passwords from a compatible central credential service;
+HTTP password verification still happens here. The production credential server is
+a separate, future project. Clients require verified TLS and a service token or
+client certificate. Successful lookups are cached for 60 seconds by default, with
+up to 4096 entries. During an outage, unexpired cached credentials still work;
+expired entries and new lookups fail closed. Password rotation can take up to the
+cache TTL to become visible. There is no automatic fallback to the CSV file.
 
-```bash
-export FLASK_APP=src.app
-export FLASK_ENV=development
-flask run --host=0.0.0.0 --port=5000
+See [authentication and limits](docs/authentication.md) for gRPC settings, certificate
+configuration, cache controls, and rate limits. Limits are per process; use shared
+ingress controls when running multiple instances. Allow for several nodes sharing
+one source address when setting limits.
+
+## Configure and check a node
+
+In the node's `rpt_http_registrations.conf`, use its ID and generated password and
+the hostname of your HTTPS endpoint:
+
+```ini
+[general]
+register_interval = 60
+
+[registrations]
+register => 1234:YOUR_GENERATED_PASSWORD@register.example.org
 ```
 
-API
+See the [AllStarLink HTTP registration guide](https://allstarlink.github.io/adv-topics/httpreg/)
+for client setup. Check its status with `rpt show registrations` in the Asterisk CLI. The
+client uses its own configured interval to schedule renewals; returning a different
+`refresh` value does not change that scheduler. Keep the server's registration
+lifetime long enough to tolerate missed renewals.
 
-- POST / : Accepts a JSON body conforming to `src/schema/request.py` and
-	responds with `src/schema/result.py` format. Example request body:
-
-```json
-{
-	"port": 4567,
-	"data": {
-		"nodes": {
-			"2509": { "node": "2500", "passwd": "1234567890", "remote": 0 }
-		}
-	}
-}
+```sh
+docker logs --tail 100 rpt-http
+docker restart rpt-http
+docker stop rpt-http
 ```
 
-On success the endpoint publishes a protobuf `update` message to Kafka
-and returns a small JSON summary including the detected client IP and
-TTL.
+An accepted registration returns HTTP 200 with `successfully registered` in its
+response, after Kafka confirms publication. A rejected password also returns 200,
+with a failure message, to match the client contract. Malformed requests return
+400, oversized bodies 413, throttled requests 429, and backend failures 503.
+The upstream client can retain an old displayed status after a non-2xx response;
+check DNS and the current registration lifetime when diagnosing a stale status.
 
-Testing
+## Build an image
 
-- A basic test loop is provided in `test.py` which POSTs a registration
-	periodically to `http://localhost:5000/`.
+From this checkout, with Docker Buildx and Python 3.13+ installed:
 
-Notes and troubleshooting
-- `src/verifier.py` contains a minimal SQLAlchemy model for the old ASL
-	`user_Nodes` table and a simple `verify()` function. Adjust as needed
-	for your authentication backend.
-- Ensure `dns_pb2.py` is importable from the application path (see
-	protobuf generation above).
-- The app uses `flask-kafka` to expose `app.bus.get_producer()`; the
-	underlying Kafka client configuration is set in `app.config["KAFKA_CONFIG"]`.
+```sh
+PROTOBUF_REV=$(python3 scripts/dependency.py)
+docker buildx build --load \
+  --build-context "rpt_protobuf=https://github.com/Hamlink-Canada/rpt_protobuf.git#${PROTOBUF_REV}" \
+  --tag rpt-http-register:local .
+```
 
-License
+The build uses the public protobuf library at this project's pinned revision.
+The image starts the production WSGI server through `rpt-http`.
 
-See the `LICENSE` file for license information.
+## Development
+
+Use Python 3.13+ and uv. Place this checkout next to `rpt_protobuf`, with the library
+at the revision printed by `scripts/dependency.py`. uv installs that sibling in
+editable mode.
+
+```sh
+uv sync --locked
+make check test build
+RPT_AUTH__FILE=examples/credentials.csv uv run --locked rpt-http
+```
+
+The example credential file is for local development only. For image builds with
+local library changes, use `--build-context rpt_protobuf=../rpt_protobuf` instead of
+the remote context. Standard Python installations use the Git SHA in
+`pyproject.toml`; update the pin and lockfile together when changing that dependency.
+The shared library owns the protobuf schemas and generated bindings.
+
+CI checks Python 3.13 and 3.14 and is configured for Linux AMD64 and ARM64 image
+builds and runtime imports. Version tags publish versioned images and commit-SHA
+tags; only stable releases update `latest`. Pull requests never publish images.
+There is no PyPI release.
+
+## License
+
+[AGPL-3.0-or-later](LICENSE).
