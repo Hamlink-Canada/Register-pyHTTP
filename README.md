@@ -8,6 +8,8 @@ You need Docker, a reachable Kafka broker, node credentials, and an HTTPS revers
 proxy for public access. The container serves HTTP on port 5000. The AllStarLink
 client connects over HTTPS, so TLS must terminate at your proxy.
 
+Full deployment and configuration details are in the [Register-pyHTTP operator guide](https://hamlink-canada.github.io/apt-rpt-docs/projects/http/).
+
 ## Prepare node credentials
 
 The default authentication backend reads a CSV file when the service starts:
