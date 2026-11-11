@@ -351,7 +351,7 @@ wheels = [
 
 [[package]]
 name = "rpt-http-register"
-version = "0.2.0"
+version = "1.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "cachetools" },
