@@ -92,10 +92,10 @@ To mount your own files at `/config`, set `RPT_CONFIG_DIR=/config`. Use plain TO
 without environment sections, and absolute paths for mounted credential files.
 
 The `grpc` backend retrieves passwords from a compatible central credential service;
-HTTP password verification still happens here. The production credential server is
-implemented in the Register-Central_Auth repository. Clients require verified TLS and a service token or
-client certificate. Successful lookups are cached for 60 seconds by default, with
-up to 4096 entries. During an outage, unexpired cached credentials still work;
+HTTP password verification still happens here. The `Register-Central_Auth` repository
+implements the production credential server. Clients require verified TLS and a
+service token or client certificate. The cache holds up to 4096 successful lookups
+for 60 seconds by default. During an outage, unexpired cached credentials still work;
 expired entries and new lookups fail closed. Password rotation can take up to the
 cache TTL to become visible. There is no automatic fallback to the CSV file.
 

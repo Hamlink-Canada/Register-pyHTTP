@@ -18,7 +18,7 @@ before the client receives the success response. The HTTP status and body follow
 the AllStarLink client contract, including a compatible response for ordinary
 credential rejection.
 
-Start with the repository [README](../README.md) for a local container example and
-configuration summary. See [authentication](authentication.md) for credential
-providers and request limits, [HTTP compatibility](http-compatibility.md) for the
-client contract, and [glossary](glossary.md) for domain terms.
+The repository [README](../README.md) covers setup and configuration. Read
+[authentication](authentication.md) for credential providers and request limits,
+[HTTP compatibility](http-compatibility.md) for the client contract, and the
+[glossary](glossary.md) for shared terms.
