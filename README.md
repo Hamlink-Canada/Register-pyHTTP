@@ -31,7 +31,7 @@ restrict other access using the file ownership and permissions on your host.
 
 ## Run the service
 
-Choose a versioned image from `ghcr.io/hamlink-canada/rpt-http-register` when a release
+Choose a versioned image from `ghcr.io/hamlink-canada/register-pyhttp` when a release
 is available. Before an image is published, [build this checkout](#build-an-image)
 and use `rpt-http-register:local`.
 
