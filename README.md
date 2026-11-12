@@ -8,7 +8,9 @@ You need Docker, a reachable Kafka broker, node credentials, and an HTTPS revers
 proxy for public access. The container serves HTTP on port 5000. The AllStarLink
 client connects over HTTPS, so TLS must terminate at your proxy.
 
-Full deployment and configuration details are in the [Register-pyHTTP operator guide](https://hamlink-canada.github.io/apt-rpt-docs/projects/http/).
+See the [HTTP registrar documentation](docs/README.md) for protocol and authentication details.
+The cross-project [operator guide](https://hamlink-canada.github.io/apt-rpt-docs/projects/http/)
+explains how it fits with the other services.
 
 ## Prepare node credentials
 
@@ -91,7 +93,7 @@ without environment sections, and absolute paths for mounted credential files.
 
 The `grpc` backend retrieves passwords from a compatible central credential service;
 HTTP password verification still happens here. The production credential server is
-a separate, future project. Clients require verified TLS and a service token or
+implemented in the Register-Central_Auth repository. Clients require verified TLS and a service token or
 client certificate. Successful lookups are cached for 60 seconds by default, with
 up to 4096 entries. During an outage, unexpired cached credentials still work;
 expired entries and new lookups fail closed. Password rotation can take up to the
