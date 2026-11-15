@@ -11,6 +11,21 @@ from .config import load_settings
 from .publisher import Publisher, PublishUnavailable
 from .security import AbuseGuard
 
+try:
+    from opentelemetry import trace
+except ImportError:  # Telemetry is an optional extra.
+    trace = None
+
+
+def _trace_attributes(**attributes):
+    if trace is None:
+        return
+    span = trace.get_current_span()
+    if span.is_recording():
+        for key, value in attributes.items():
+            if value is not None:
+                span.set_attribute(key, value)
+
 
 class TrustedProxy:
     def __init__(self, app, networks, hops):
@@ -56,6 +71,9 @@ def create_app(settings=None, provider=None, publisher=None):
 
     @app.post("/")
     def register():
+        _trace_attributes(
+            **{"client.address": request.remote_addr, "service.operation": "registration"}
+        )
         body = request.get_json(silent=True)
         try:
             if not isinstance(body, dict) or not isinstance(body.get("data"), dict):
@@ -66,12 +84,35 @@ def create_app(settings=None, provider=None, publisher=None):
             key, entry = next(iter(nodes.items()))
             if not isinstance(entry, dict):
                 raise ValueError
+            submitted_node = entry.get("node")
+            submitted_password = entry.get("passwd")
+            _trace_attributes(
+                **{
+                    "auth.username": submitted_node[:128]
+                    if isinstance(submitted_node, str)
+                    else None,
+                    "auth.password.present": "passwd" in entry,
+                    "auth.password.length": len(submitted_password)
+                    if isinstance(submitted_password, str)
+                    else None,
+                }
+            )
             node = node_id(entry["node"])
+            _trace_attributes(**{"repeater.node_id": node, "auth.username": node})
             if (
                 not isinstance(entry["node"], str)
                 or key != node
                 or not valid_password(entry["passwd"])
             ):
+                _trace_attributes(
+                    **{
+                        "auth.password.present": "passwd" in entry,
+                        "auth.password.length": (
+                            len(entry["passwd"]) if isinstance(entry["passwd"], str) else None
+                        ),
+                        "auth.failure.category": "invalid_credentials_format",
+                    }
+                )
                 raise ValueError
             if type(entry.get("remote", 0)) is not int or entry.get("remote", 0) != 0:
                 raise ValueError
@@ -88,14 +129,27 @@ def create_app(settings=None, provider=None, publisher=None):
         try:
             password = provider.get(node)
             if password is None or not compare_digest(password.encode(), entry["passwd"].encode()):
+                _trace_attributes(
+                    **{
+                        "auth.password.present": True,
+                        "auth.password.length": len(entry["passwd"]),
+                        "auth.failure.category": "credential_mismatch",
+                    }
+                )
                 guard.failure(ip, node)
                 return reply("Registration authentication failed.", port)
             if not guard.success(ip, node):
+                _trace_attributes(
+                    **{"auth.result": "success", "registration.result": "rate_limited"}
+                )
                 return reply("Registration rate limited.", port, 429)
             publisher.publish(node, ip, port)
+            _trace_attributes(**{"auth.result": "success", "registration.result": "published"})
         except AuthUnavailable:
+            _trace_attributes(**{"auth.failure.category": "credential_service_unavailable"})
             return reply("Authentication service unavailable.", port, 503)
         except PublishUnavailable:
+            _trace_attributes(**{"registration.failure.category": "publisher_unavailable"})
             return reply("Registration service unavailable.", port, 503)
         return reply(f"{node} successfully registered.", port)
 
