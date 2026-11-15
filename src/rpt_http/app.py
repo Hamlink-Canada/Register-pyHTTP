@@ -108,9 +108,7 @@ def create_app(settings=None, provider=None, publisher=None):
                     **{
                         "auth.password.present": "passwd" in entry,
                         "auth.password.length": (
-                            len(entry["passwd"])
-                            if isinstance(entry["passwd"], str)
-                            else None
+                            len(entry["passwd"]) if isinstance(entry["passwd"], str) else None
                         ),
                         "auth.failure.category": "invalid_credentials_format",
                     }
