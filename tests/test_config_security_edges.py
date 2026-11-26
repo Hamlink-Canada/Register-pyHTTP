@@ -72,6 +72,30 @@ def test_abuse_guard_throttles_then_refills_and_tracks_outcomes():
     assert guard.metrics["auth_success"] == 2
 
 
+def test_global_rejection_does_not_retain_a_new_source():
+    settings = load_settings(limits={"global_rate": 1, "global_burst": 1, "state_size": 8})
+    guard = AbuseGuard(settings, timer=lambda: 0)
+    assert guard.ingress("192.0.2.1")
+    assert not guard.ingress("192.0.2.2")
+    assert set(guard.source_buckets) == {"192.0.2.1"}
+
+
+def test_source_state_expires_on_source_refill_window():
+    settings = load_settings(
+        limits={
+            "source_rate": 1,
+            "source_burst": 1,
+            "refresh_rate": 1,
+            "refresh_burst": 1440,
+        }
+    )
+    now = [0.0]
+    guard = AbuseGuard(settings, timer=lambda: now[0])
+    assert guard.ingress("192.0.2.1")
+    now[0] = 601
+    assert guard.ingress("192.0.2.2")
+
+
 def test_abuse_guard_bounds_state_and_records_rejection():
     settings = load_settings(limits={"state_size": 2, "global_burst": 100})
     guard = AbuseGuard(settings, timer=lambda: 0)
