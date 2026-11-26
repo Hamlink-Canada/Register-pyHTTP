@@ -94,6 +94,7 @@ def test_source_state_expires_on_source_refill_window():
     assert guard.ingress("192.0.2.1")
     now[0] = 601
     assert guard.ingress("192.0.2.2")
+    assert "192.0.2.1" not in guard.source_buckets
 
 
 def test_abuse_guard_bounds_state_and_records_rejection():
