@@ -7,6 +7,7 @@ from rpt_http.security import AbuseGuard
 @pytest.fixture(autouse=True)
 def isolated_config(monkeypatch, tmp_path):
     monkeypatch.setenv("RPT_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("RPT_ENVIRONMENT", "development")
 
 
 @pytest.mark.parametrize(
@@ -19,11 +20,19 @@ def isolated_config(monkeypatch, tmp_path):
         {"kafka": {"security_protocol": "SSL"}},
         {"kafka": {"security_protocol": "SASL_SSL"}},
         {"limits": {"workers": True}},
+        {"refresh": 60.5},
+        {"grpc": {"concurrency": 2.5}},
+        {"limits": {"call_size": 10.5}},
     ],
 )
 def test_http_config_rejects_invalid_values(overrides):
     with pytest.raises(ValueError):
         load_settings(**overrides)
+
+
+def test_http_requires_scram_tls_outside_development():
+    with pytest.raises(ValueError, match="SASL_SSL"):
+        load_settings(environment="production")
 
 
 def test_http_config_loads_nested_file_environment_and_override(monkeypatch, tmp_path):
@@ -67,6 +76,16 @@ def test_abuse_guard_bounds_state_and_records_rejection():
     settings = load_settings(limits={"state_size": 2, "global_burst": 100})
     guard = AbuseGuard(settings, timer=lambda: 0)
     assert guard.ingress("192.0.2.1")
-    assert not guard.ingress("192.0.2.2")
-    assert len(guard.buckets) == 2
+    assert guard.ingress("192.0.2.2")
+    assert not guard.ingress("192.0.2.3")
+    assert len(guard.source_buckets) == 2
     assert guard.metrics["state_full"] == 1
+
+
+def test_ingress_state_does_not_consume_authentication_budget():
+    settings = load_settings(limits={"state_size": 2, "global_burst": 100})
+    guard = AbuseGuard(settings, timer=lambda: 0)
+    assert guard.ingress("192.0.2.1")
+    assert guard.ingress("192.0.2.2")
+    assert not guard.ingress("192.0.2.3")
+    assert guard.auth_allowed("192.0.2.3", "1234")
